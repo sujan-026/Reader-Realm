@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { Layout } from "../components/Layout";
 import { StarRating } from "../components/StarRating";
 import { ReviewCard } from "../components/ReviewCard";
@@ -11,8 +11,10 @@ import {
   ArrowLeft,
   ThumbsUp,
   MessageSquare,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "../hooks/use-toast";
+import { BookDetailSkeleton } from "../components/LoadingState";
 
 interface Review {
   _id?: string;
@@ -73,7 +75,7 @@ const BookDetail = () => {
   if (loading) {
     return (
       <Layout>
-        <div className="text-center py-20 text-xl">Loading book details...</div>
+        <BookDetailSkeleton />
       </Layout>
     );
   }
@@ -84,14 +86,23 @@ const BookDetail = () => {
 
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!user) {
+      toast({
+        title: "Login required",
+        description: "Please log in to submit a review.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Use user data if available, otherwise fallback to guest user
     const reviewData = {
-      bookId: id!, // Make sure this is included
-      userId: user?.id || "guest-user",
-      userName: user?.name || "Guest Reader",
-      userAvatar: user?.avatar || "", // Add this field
+      bookId: id!,
+      userId: user.id,
+      userName: user.name,
+      userAvatar: user.avatar || "",
       rating: userRating,
       text: userReview,
     };
@@ -225,49 +236,74 @@ const BookDetail = () => {
               Reviews
             </h2>
 
-            <form
-              onSubmit={handleReviewSubmit}
-              className="mb-10 bg-card p-6 rounded-lg shadow-sm"
-            >
-              <h3 className="text-lg font-medium mb-4">Write a Review</h3>
-
-              <div className="mb-4">
-                <label className="block text-sm font-medium mb-2">Rating</label>
-                <div className="flex gap-4 items-center">
-                  <StarRating rating={userRating} />
-                  <select
-                    aria-label="Rating"
-                    value={userRating}
-                    onChange={(e) => setUserRating(Number(e.target.value))}
-                    className="rounded-md border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                  >
-                    {[1, 2, 3, 4, 5].map((num) => (
-                      <option key={num} value={num}>
-                        {num}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <textarea
-                value={userReview}
-                onChange={(e) => setUserReview(e.target.value)}
-                rows={4}
-                placeholder="Share your thoughts..."
-                className="w-full rounded-md border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                required
-              />
-
-              <button
-                type="submit"
-                disabled={isSubmitting || !userReview.trim()}
-                className="mt-4 inline-flex items-center bg-primary px-4 py-2 text-sm font-medium text-primary-foreground rounded-md"
+            {user ? (
+              <form
+                onSubmit={handleReviewSubmit}
+                className="mb-10 bg-card p-6 rounded-lg shadow-sm"
               >
-                {isSubmitting ? "Submitting..." : "Submit Review"}
-                <ThumbsUp className="ml-2 h-4 w-4" />
-              </button>
-            </form>
+                <h3 className="text-lg font-medium mb-4">Write a Review</h3>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">
+                    Rating
+                  </label>
+                  <div className="flex gap-4 items-center">
+                    <StarRating rating={userRating} />
+                    <select
+                      aria-label="Rating"
+                      value={userRating}
+                      onChange={(e) => setUserRating(Number(e.target.value))}
+                      className="rounded-md border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    >
+                      {[1, 2, 3, 4, 5].map((num) => (
+                        <option key={num} value={num}>
+                          {num}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <textarea
+                  value={userReview}
+                  onChange={(e) => setUserReview(e.target.value)}
+                  rows={4}
+                  placeholder="Share your thoughts..."
+                  className="w-full rounded-md border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  required
+                />
+
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !userReview.trim()}
+                  className="mt-4 inline-flex items-center bg-primary px-4 py-2 text-sm font-medium text-primary-foreground rounded-md disabled:opacity-60"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      Submit Review
+                      <ThumbsUp className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </button>
+              </form>
+            ) : (
+              <div className="mb-10 bg-card p-6 rounded-lg shadow-sm text-center space-y-3">
+                <p className="text-muted-foreground">
+                  Log in to share your review with the community.
+                </p>
+                <Link
+                  to="/login"
+                  className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                >
+                  Log in to review
+                </Link>
+              </div>
+            )}
 
             {recentReviews.length > 0 ? (
               <div className="space-y-2">

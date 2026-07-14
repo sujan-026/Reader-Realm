@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon, Loader2, ArrowLeft, Save } from 'lucide-react';
 import { toast } from 'sonner';
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
 
 const BookEditor = () => {
   const { id } = useParams();
@@ -101,9 +101,7 @@ const BookEditor = () => {
     try {
       const response = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: authHeaders(),
         body: JSON.stringify(formData),
       });
 

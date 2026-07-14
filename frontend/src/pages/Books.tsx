@@ -1,14 +1,14 @@
-
-import React from 'react';
-import { Layout } from '../components/Layout';
-import { SearchBar } from '../components/SearchBar';
-import { BookFilter } from '../components/BookFilter';
-import { BookCard } from '../components/BookCard';
-import { useBooks } from '../context/BookContext';
-import { Book } from 'lucide-react';
+import React from "react";
+import { Layout } from "../components/Layout";
+import { SearchBar } from "../components/SearchBar";
+import { BookFilter } from "../components/BookFilter";
+import { BookCard } from "../components/BookCard";
+import { useBooks } from "../context/BookContext";
+import { Book } from "lucide-react";
+import { BookGridSkeleton } from "../components/LoadingState";
 
 const Books = () => {
-  const { filteredBooks, searchTerm } = useBooks();
+  const { filteredBooks, searchTerm, isLoading, error } = useBooks();
 
   return (
     <Layout>
@@ -33,13 +33,19 @@ const Books = () => {
           </div>
         </div>
         <div className="md:col-span-3">
-          {filteredBooks.length > 0 ? (
+          {isLoading ? (
+            <BookGridSkeleton count={9} />
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <h3 className="mb-2 text-lg font-medium">Something went wrong</h3>
+              <p className="text-muted-foreground">{error}</p>
+            </div>
+          ) : filteredBooks.length > 0 ? (
             <>
               <p className="mb-4 text-sm text-muted-foreground">
-                Showing {filteredBooks.length} book{filteredBooks.length !== 1 ? 's' : ''}
-                {searchTerm && (
-                  <span> for "{searchTerm}"</span>
-                )}
+                Showing {filteredBooks.length} book
+                {filteredBooks.length !== 1 ? "s" : ""}
+                {searchTerm && <span> for "{searchTerm}"</span>}
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 gap-4">
                 {filteredBooks.map((book, index) => (

@@ -16,20 +16,30 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Edit, Trash2, Search } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, Search, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
+
+type AdminUser = {
+  _id: string;
+  name: string;
+  email: string;
+  role: string;
+};
 
 const UserManagement = () => {
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState<AdminUser[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Fetch all users
   const fetchUsers = async () => {
+    setIsLoading(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/users`
-      );
+      const response = await fetch(`${API_URL}/api/users`, {
+        headers: authHeaders(),
+      });
       if (!response.ok) throw new Error("Failed to fetch users");
 
       const data = await response.json();
@@ -39,6 +49,8 @@ const UserManagement = () => {
     } catch (error) {
       console.error("Error fetching users:", error);
       toast.error("Failed to load users");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -46,39 +58,38 @@ const UserManagement = () => {
     fetchUsers();
   }, []);
 
-  // Handle user deletion
-  const handleDeleteUser = async (userId) => {
+  const handleDeleteUser = async (userId: string) => {
+    setDeletingId(userId);
     try {
-      const response = await fetch(
-        `${API_URL}/api/users/${userId}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const response = await fetch(`${API_URL}/api/users/${userId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
 
       if (response.ok) {
         toast.success("User deleted successfully");
-        setUsers(users.filter((user) => user._id !== userId)); // Remove deleted user
+        setUsers(users.filter((user) => user._id !== userId));
       } else {
-        toast.error("Failed to delete user");
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.message || "Failed to delete user");
       }
     } catch (error) {
       console.error("Error deleting user:", error);
       toast.error("Failed to delete user");
+    } finally {
+      setDeletingId(null);
     }
   };
 
-  // Filter users based on search input
   const filteredUsers = users.filter(
     (user) =>
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase())
+      user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      user.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   return (
     <AdminLayout>
       <div className="space-y-6">
-        {/* Header & Search Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <h1 className="text-3xl font-bold tracking-tight">Users</h1>
           <div className="relative flex-1">
@@ -93,7 +104,6 @@ const UserManagement = () => {
           </div>
         </div>
 
-        {/* User Table */}
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -105,7 +115,17 @@ const UserManagement = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredUsers.length > 0 ? (
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 4 }).map((_, j) => (
+                      <TableCell key={j}>
+                        <Skeleton className="h-4 w-28" />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : filteredUsers.length > 0 ? (
                 filteredUsers.map((user) => (
                   <TableRow key={user._id}>
                     <TableCell>{user.name}</TableCell>
@@ -114,8 +134,16 @@ const UserManagement = () => {
                     <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            <MoreHorizontal className="h-4 w-4" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingId === user._id}
+                          >
+                            {deletingId === user._id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="h-4 w-4" />
+                            )}
                             <span className="sr-only">Open menu</span>
                           </Button>
                         </DropdownMenuTrigger>

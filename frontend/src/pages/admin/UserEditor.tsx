@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, Save, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
 
 const UserEditor = () => {
   const { id } = useParams(); // `id` corresponds to the user _id
@@ -15,6 +15,7 @@ const UserEditor = () => {
   const isNewUser = id === "new";
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(!isNewUser);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -23,22 +24,24 @@ const UserEditor = () => {
   });
 
   useEffect(() => {
-    // Load user data when editing an existing user (not a new one)
     if (!isNewUser && id) {
-      fetch(`${API_URL}/api/users/${id}`) // Fetch user by _id
+      setIsFetching(true);
+      fetch(`${API_URL}/api/users/${id}`, { headers: authHeaders() })
         .then((response) => response.json())
-        .then((data) => {
+        .then((payload) => {
+          const data = payload.data || payload;
           setFormData({
-            name: data.name,
-            email: data.email,
-            role: data.role,
-            isActive: data.isActive,
+            name: data.name || "",
+            email: data.email || "",
+            role: data.role || "user",
+            isActive: data.isActive !== false,
           });
         })
         .catch((error) => {
           console.error("Error fetching user:", error);
           toast.error("Failed to load user data");
-        });
+        })
+        .finally(() => setIsFetching(false));
     }
   }, [id, isNewUser]);
 
@@ -66,9 +69,7 @@ const UserEditor = () => {
     try {
       const response = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: authHeaders(),
         body: JSON.stringify(formData),
       });
 
@@ -107,6 +108,12 @@ const UserEditor = () => {
           </Button>
         </div>
 
+        {isFetching ? (
+          <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading user...
+          </div>
+        ) : (
         <form
           onSubmit={handleSubmit}
           className="space-y-8 border rounded-lg p-6"
@@ -186,6 +193,7 @@ const UserEditor = () => {
             </Button>
           </div>
         </form>
+        )}
       </div>
     </AdminLayout>
   );

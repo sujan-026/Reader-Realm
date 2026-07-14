@@ -7,7 +7,7 @@ import React, {
 } from "react";
 
 import axios from "axios";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders, getToken } from "@/lib/api";
 
 export type Book = {
   _id: string;
@@ -25,6 +25,7 @@ export type Book = {
 
 export type Review = {
   id: string;
+  _id?: string;
   userId: string;
   userName: string;
   userAvatar?: string;
@@ -37,6 +38,8 @@ type BookContextType = {
   books: Book[];
   featuredBooks: Book[];
   filteredBooks: Book[];
+  isLoading: boolean;
+  error: string | null;
   searchTerm: string;
   selectedGenres: string[];
   setSearchTerm: (term: string) => void;
@@ -56,6 +59,8 @@ type BookContextType = {
     rating: number;
     text: string;
   }) => Promise<{ success: boolean; data: Review }>;
+  refreshBooks: () => Promise<void>;
+  removeBookLocally: (bookId: string) => void;
 };
 
 const BookContext = createContext<BookContextType | undefined>(undefined);
@@ -64,29 +69,29 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [books, setBooks] = useState<Book[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
 
-  useEffect(() => {
   const fetchBooks = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const response = await fetch(
-        `${API_URL}/api/books`
-      );
+      const response = await fetch(`${API_URL}/api/books`);
       if (!response.ok) throw new Error("Failed to fetch books");
 
       const data = await response.json();
       if (!data.success) throw new Error("Failed to fetch books");
 
-      // Fetch reviews for each book individually
       const booksWithReviews = await Promise.all(
-        data.data.map(async (book) => {
+        data.data.map(async (book: Book & { reviews: string[] }) => {
           const reviewsWithDetails = await Promise.all(
-            book.reviews.map(async (reviewId: string) => {
+            (book.reviews || []).map(async (reviewId: string) => {
               const reviewResponse = await fetch(
                 `${API_URL}/api/reviews/${reviewId}`
               );
-              if (!reviewResponse.ok) return null; // Handle failed requests
+              if (!reviewResponse.ok) return null;
 
               const reviewData = await reviewResponse.json();
               return reviewData.success ? reviewData.data : null;
@@ -95,39 +100,56 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
 
           return {
             ...book,
-            reviews: reviewsWithDetails.filter((review) => review !== null), // Remove failed requests
+            reviews: reviewsWithDetails.filter((review) => review !== null),
           };
         })
       );
 
       setBooks(booksWithReviews);
-    } catch (error) {
-      console.error("Error fetching books:", error);
+    } catch (err) {
+      console.error("Error fetching books:", err);
+      setError("Could not load books. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  fetchBooks();
-}, []);
+  useEffect(() => {
+    fetchBooks();
+  }, []);
 
-
-
-  // Fetch a single book by ID
   const fetchBookById = async (bookId: string) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/books/${bookId}`
-      );
+      const response = await fetch(`${API_URL}/api/books/${bookId}`);
       if (!response.ok) throw new Error("Failed to fetch book");
       const data = await response.json();
-      // console.log(data.data);
-      return data.data; // Ensure we return the book object from API response
-    } catch (error) {
-      console.error("Error fetching book:", error);
+      const book = data.data;
+      if (!book) return null;
+
+      const reviewsWithDetails = await Promise.all(
+        (book.reviews || []).map(async (reviewId: string | Review) => {
+          if (typeof reviewId === "object" && reviewId !== null) {
+            return reviewId;
+          }
+          const reviewResponse = await fetch(
+            `${API_URL}/api/reviews/${reviewId}`
+          );
+          if (!reviewResponse.ok) return null;
+          const reviewData = await reviewResponse.json();
+          return reviewData.success ? reviewData.data : null;
+        })
+      );
+
+      return {
+        ...book,
+        reviews: reviewsWithDetails.filter(Boolean),
+      };
+    } catch (err) {
+      console.error("Error fetching book:", err);
       return null;
     }
   };
 
-  // Derived state
   const featuredBooks = books.filter((book) => book.featured);
   const filteredBooks = books.filter((book) => {
     const matchesSearch =
@@ -141,10 +163,9 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
     return matchesSearch && matchesGenres;
   });
 
-  // Add review and update database
   const addReview = async (
     bookId: string,
-    review: Omit<Review, "_id" | "date">
+    review: Omit<Review, "id" | "date">
   ) => {
     const reviewPayload = {
       ...review,
@@ -153,35 +174,32 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
     };
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/reviews/`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(reviewPayload),
-        }
-      );
+      const response = await fetch(`${API_URL}/api/reviews/`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify(reviewPayload),
+      });
 
       if (!response.ok) throw new Error("Failed to add review");
 
       const data = await response.json();
       if (!data.success) throw new Error("Failed to add review");
 
-      const newReview = data.data; // Get the new review from the response
+      const newReview = data.data;
 
       setBooks((prevBooks) =>
         prevBooks.map((book) =>
           book._id === bookId
             ? {
                 ...book,
-                reviews: [newReview, ...book.reviews], // Add new review
+                reviews: [newReview, ...book.reviews],
                 rating: calculateAverageRating([...book.reviews, newReview]),
               }
             : book
         )
       );
-    } catch (error) {
-      console.error("Error adding review:", error);
+    } catch (err) {
+      console.error("Error adding review:", err);
     }
   };
 
@@ -196,28 +214,35 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
     try {
       const response = await axios.post(
         `${API_URL}/api/reviews/`,
-        reviewData
+        {
+          bookId: reviewData.bookId,
+          rating: reviewData.rating,
+          text: reviewData.text,
+          userAvatar: reviewData.userAvatar,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${getToken()}`,
+          },
+        }
       );
       return response.data;
-    } catch (error) {
-      console.error("Review submission error:", error);
-      throw error;
+    } catch (err) {
+      console.error("Review submission error:", err);
+      throw err;
     }
   };
 
-  // Calculate new average rating
   const calculateAverageRating = (reviews: Review[]): number => {
     if (reviews.length === 0) return 0;
     const sum = reviews.reduce((acc, review) => acc + review.rating, 0);
     return parseFloat((sum / reviews.length).toFixed(1));
   };
 
-  // Get book by ID
   const getBook = (id: string): Book | undefined => {
     return books.find((book) => book._id === id);
   };
 
-  // Get all unique genres
   const getAllGenres = (): string[] => {
     const genresSet = new Set<string>();
     books.forEach((book) =>
@@ -226,12 +251,18 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
     return Array.from(genresSet);
   };
 
+  const removeBookLocally = (bookId: string) => {
+    setBooks((prev) => prev.filter((book) => book._id !== bookId));
+  };
+
   return (
     <BookContext.Provider
       value={{
         books,
         featuredBooks,
         filteredBooks,
+        isLoading,
+        error,
         searchTerm,
         selectedGenres,
         setSearchTerm,
@@ -241,6 +272,8 @@ export const BookProvider: React.FC<{ children: ReactNode }> = ({
         getAllGenres,
         fetchBookById,
         submitReview,
+        refreshBooks: fetchBooks,
+        removeBookLocally,
       }}
     >
       {children}

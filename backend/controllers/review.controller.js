@@ -1,11 +1,10 @@
 import Review from "../models/Review.js";
-import Book from "../models/Book.js"; // Import Book model
+import Book from "../models/Book.js";
 import mongoose from "mongoose";
 
-// Get all reviews
 export const getReview = async (req, res) => {
   try {
-    const reviews = await Review.find().populate("bookId", "title author"); // Populate book details
+    const reviews = await Review.find().populate("bookId", "title author");
     res.status(200).json({ success: true, data: reviews });
   } catch (error) {
     console.error("Error fetching reviews:", error.message);
@@ -13,7 +12,6 @@ export const getReview = async (req, res) => {
   }
 };
 
-// Get a review by ID
 export const getReviewById = async (req, res) => {
   const { id } = req.params;
 
@@ -38,19 +36,33 @@ export const getReviewById = async (req, res) => {
   }
 };
 
-// Create a new review
 export const createReview = async (req, res) => {
   try {
-    const { bookId, userId, userName, userAvatar, rating, text } = req.body;
+    const { bookId, rating, text, userAvatar } = req.body;
 
-    // Validate required fields
-    if (!bookId || !userId || !userName || !rating || !text) {
+    if (!bookId || rating == null || !text) {
       return res
         .status(400)
         .json({ success: false, message: "Missing required fields" });
     }
 
-    // Check if book exists
+    const numericRating = Number(rating);
+    if (
+      Number.isNaN(numericRating) ||
+      numericRating < 1 ||
+      numericRating > 5
+    ) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Rating must be between 1 and 5" });
+    }
+
+    if (String(text).trim().length < 3) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Review text is too short" });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(bookId)) {
       return res
         .status(400)
@@ -64,20 +76,19 @@ export const createReview = async (req, res) => {
         .json({ success: false, message: "Book not found" });
     }
 
-    // Create new review
+    // Identity comes from the authenticated token — never trust body userId
     const newReview = new Review({
       bookId,
-      userId,
-      userName,
+      userId: req.user.id,
+      userName: req.user.name || "Anonymous",
       userAvatar,
-      rating,
-      text,
+      rating: numericRating,
+      text: String(text).trim().slice(0, 2000),
       date: new Date(),
     });
 
     await newReview.save();
 
-    // Add review ID to the book's `reviews` array
     book.reviews.push(newReview._id);
     await book.save();
 
@@ -88,7 +99,6 @@ export const createReview = async (req, res) => {
   }
 };
 
-// Delete a review
 export const deleteReview = async (req, res) => {
   const { id } = req.params;
 
@@ -106,9 +116,15 @@ export const deleteReview = async (req, res) => {
         .json({ success: false, message: "Review not found" });
     }
 
-    // Remove review from book's `reviews` array
-    await Book.findByIdAndUpdate(review.bookId, { $pull: { reviews: id } });
+    const isOwner = review.userId?.toString() === req.user.id;
+    const isAdmin = req.user.role === "admin";
+    if (!isOwner && !isAdmin) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
 
+    await Book.findByIdAndUpdate(review.bookId, { $pull: { reviews: id } });
     await Review.findByIdAndDelete(id);
     res.status(200).json({ success: true, message: "Review removed" });
   } catch (error) {
@@ -117,7 +133,6 @@ export const deleteReview = async (req, res) => {
   }
 };
 
-// Update a review
 export const updateReview = async (req, res) => {
   const { id } = req.params;
   const { rating, text } = req.body;
@@ -129,17 +144,42 @@ export const updateReview = async (req, res) => {
   }
 
   try {
-    const updatedReview = await Review.findByIdAndUpdate(
-      id,
-      { rating, text, date: new Date() },
-      { new: true }
-    );
-
-    if (!updatedReview) {
+    const review = await Review.findById(id);
+    if (!review) {
       return res
         .status(404)
         .json({ success: false, message: "Review not found" });
     }
+
+    const isOwner = review.userId?.toString() === req.user.id;
+    const isAdmin = req.user.role === "admin";
+    if (!isOwner && !isAdmin) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Not authorized" });
+    }
+
+    const updates = { date: new Date() };
+    if (rating != null) {
+      const numericRating = Number(rating);
+      if (
+        Number.isNaN(numericRating) ||
+        numericRating < 1 ||
+        numericRating > 5
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Rating must be between 1 and 5" });
+      }
+      updates.rating = numericRating;
+    }
+    if (text !== undefined) {
+      updates.text = String(text).trim().slice(0, 2000);
+    }
+
+    const updatedReview = await Review.findByIdAndUpdate(id, updates, {
+      new: true,
+    });
 
     res.status(200).json({ success: true, data: updatedReview });
   } catch (error) {

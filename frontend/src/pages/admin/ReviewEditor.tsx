@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Calendar } from "@/components/ui/calendar";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
 
 const ReviewEditor = () => {
   const { id } = useParams(); // `id` corresponds to the review _id
@@ -28,8 +28,9 @@ const ReviewEditor = () => {
   const isNewReview = id === "new";
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(!isNewReview);
   const [formData, setFormData] = useState({
-    bookId: "", // Book that is being reviewed
+    bookId: "",
     reviewerName: "",
     rating: 0,
     reviewText: "",
@@ -38,24 +39,29 @@ const ReviewEditor = () => {
   const [date, setDate] = useState<Date | undefined>(new Date());
 
   useEffect(() => {
-    // Load review data when editing an existing review (not a new one)
     if (!isNewReview && id) {
-      fetch(`${API_URL}/api/reviews/${id}`) // Fetch review by _id
+      setIsFetching(true);
+      fetch(`${API_URL}/api/reviews/${id}`)
         .then((response) => response.json())
-        .then((data) => {
+        .then((payload) => {
+          const data = payload.data || payload;
           setFormData({
-            bookId: data.bookId, // Assuming the response has a `bookId` field
-            reviewerName: data.reviewerName,
-            rating: data.rating,
-            reviewText: data.reviewText,
-            featured: data.featured,
+            bookId:
+              typeof data.bookId === "object"
+                ? data.bookId?._id || ""
+                : data.bookId || "",
+            reviewerName: data.userName || data.reviewerName || "",
+            rating: data.rating || 0,
+            reviewText: data.text || data.reviewText || "",
+            featured: data.featured || false,
           });
-          setDate(new Date(data.createdAt)); // Assuming a `createdAt` field in response
+          if (data.date) setDate(new Date(data.date));
         })
         .catch((error) => {
           console.error("Error fetching review:", error);
           toast.error("Failed to load review data");
-        });
+        })
+        .finally(() => setIsFetching(false));
     }
   }, [id, isNewReview]);
 
@@ -83,10 +89,19 @@ const ReviewEditor = () => {
     try {
       const response = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
+        headers: authHeaders(),
+        body: JSON.stringify(
+          isNewReview
+            ? {
+                bookId: formData.bookId,
+                rating: formData.rating,
+                text: formData.reviewText,
+              }
+            : {
+                rating: formData.rating,
+                text: formData.reviewText,
+              }
+        ),
       });
 
       if (!response.ok) {
@@ -128,6 +143,12 @@ const ReviewEditor = () => {
           </Button>
         </div>
 
+        {isFetching ? (
+          <div className="flex items-center justify-center py-16 text-muted-foreground gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading review...
+          </div>
+        ) : (
         <form
           onSubmit={handleSubmit}
           className="space-y-8 border rounded-lg p-6"
@@ -249,6 +270,7 @@ const ReviewEditor = () => {
             </Button>
           </div>
         </form>
+        )}
       </div>
     </AdminLayout>
   );

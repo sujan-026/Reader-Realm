@@ -10,7 +10,8 @@ import {
 import { BookOpen, Star, Users, MessageSquare } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
+import { PageLoader } from "@/components/LoadingState";
 
 const Dashboard = () => {
   const [books, setBooks] = useState([]);
@@ -34,7 +35,9 @@ const Dashboard = () => {
         const booksArray = booksData.data
 
         // Fetch Users
-        const usersRes = await fetch(`${API_URL}/api/users`);
+        const usersRes = await fetch(`${API_URL}/api/users`, {
+          headers: authHeaders(),
+        });
         if (!usersRes.ok)
           throw new Error(
             `Users API Error: ${usersRes.status} ${usersRes.statusText}`
@@ -84,7 +87,7 @@ const Dashboard = () => {
   if (loading)
     return (
       <AdminLayout>
-        <p className="text-center py-20">Loading...</p>
+        <PageLoader label="Loading dashboard..." />
       </AdminLayout>
     );
   if (error)

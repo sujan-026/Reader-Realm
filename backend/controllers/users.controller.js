@@ -1,19 +1,23 @@
 import bcrypt from "bcryptjs";
 import User from "../models/Users.js";
 import mongoose from "mongoose";
+import { sanitizeUser, signToken } from "../middleware/auth.js";
 
-// Get all users
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export const getUsers = async (req, res) => {
   try {
-    const users = await User.find();
-    res.status(200).json({ success: true, data: users });
+    const users = await User.find().select("-password");
+    res.status(200).json({
+      success: true,
+      data: users.map((u) => sanitizeUser(u)),
+    });
   } catch (error) {
     console.error("Error fetching users:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
-// Get user by ID
 export const getUserById = async (req, res) => {
   const { id } = req.params;
 
@@ -22,73 +26,116 @@ export const getUserById = async (req, res) => {
   }
 
   try {
-    const user = await User.findById(id);
-    if (!user)
+    const user = await User.findById(id).select("-password");
+    if (!user) {
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
+    }
 
-    res.status(200).json({ success: true, data: user });
+    res.status(200).json({ success: true, data: sanitizeUser(user) });
   } catch (error) {
     console.error("Error fetching user:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
-// Create a new user
 export const createUser = async (req, res) => {
-  const { name, avatar, email, role, password } = req.body;
+  const { name, avatar, email, password } = req.body;
+  // Role is never accepted from the client on public signup
+  const requestedRole = req.user?.role === "admin" ? req.body.role : undefined;
+  const role = requestedRole === "admin" ? "admin" : "user";
 
   if (!name || !email || !password) {
+    return res.status(400).json({
+      success: false,
+      message: "Name, email, and password are required",
+    });
+  }
+
+  if (!EMAIL_REGEX.test(email)) {
     return res
       .status(400)
-      .json({
-        success: false,
-        message: "Complete details of Users is required",
-      });
+      .json({ success: false, message: "Invalid email format" });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: "Password must be at least 6 characters",
+    });
   }
 
   try {
-    // Hash the password before saving it to the database
-    const salt = await bcrypt.genSalt(10); // Generate 10 rounds of salt
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existing) {
+      return res
+        .status(409)
+        .json({ success: false, message: "Email already registered" });
+    }
+
+    const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const newUser = new User({
-      name,
+      name: name.trim(),
       avatar,
-      email,
+      email: email.toLowerCase().trim(),
       role,
       password: hashedPassword,
     });
     await newUser.save();
 
-    res.status(201).json({ success: true, data: newUser });
+    const safeUser = sanitizeUser(newUser);
+    const token = signToken(newUser);
+
+    res.status(201).json({ success: true, data: safeUser, token });
   } catch (error) {
     console.error("Error creating user:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
-// Update user by ID
 export const updateUser = async (req, res) => {
   const { id } = req.params;
-  const { name, avatar, email, role, password } = req.body;
+  const { name, avatar, email, password } = req.body;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ success: false, message: "Invalid user ID" });
   }
 
   try {
-    // If password is being updated, hash it before saving
-    let updatedUserData = { name, avatar, email, role };
+    const updatedUserData = {};
+    if (name !== undefined) updatedUserData.name = String(name).trim();
+    if (avatar !== undefined) updatedUserData.avatar = avatar;
+    if (email !== undefined) {
+      if (!EMAIL_REGEX.test(email)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid email format" });
+      }
+      updatedUserData.email = email.toLowerCase().trim();
+    }
+
+    // Only admins can change roles
+    if (req.user?.role === "admin" && req.body.role !== undefined) {
+      updatedUserData.role = req.body.role === "admin" ? "admin" : "user";
+    }
+
     if (password) {
+      if (password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: "Password must be at least 6 characters",
+        });
+      }
       const salt = await bcrypt.genSalt(10);
       updatedUserData.password = await bcrypt.hash(password, salt);
     }
 
     const updatedUser = await User.findByIdAndUpdate(id, updatedUserData, {
       new: true,
-    });
+    }).select("-password");
 
     if (!updatedUser) {
       return res
@@ -96,14 +143,13 @@ export const updateUser = async (req, res) => {
         .json({ success: false, message: "User not found" });
     }
 
-    res.status(200).json({ success: true, data: updatedUser });
+    res.status(200).json({ success: true, data: sanitizeUser(updatedUser) });
   } catch (error) {
     console.error("Error updating user:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });
   }
 };
 
-// Delete user by ID
 export const deleteUser = async (req, res) => {
   const { id } = req.params;
 
@@ -127,21 +173,26 @@ export const deleteUser = async (req, res) => {
   }
 };
 
-// Authenticate user (login)
 export const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
+  if (!email || !password) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Email and password are required" });
+  }
+
   try {
-    // Find user by email only (not with password)
-    const user = await User.findOne({ email });
+    const user = await User.findOne({
+      email: email.toLowerCase().trim(),
+    });
 
     if (!user) {
       return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+        .status(401)
+        .json({ success: false, message: "Invalid credentials" });
     }
 
-    // Compare the hashed password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res
@@ -149,10 +200,10 @@ export const loginUser = async (req, res) => {
         .json({ success: false, message: "Invalid credentials" });
     }
 
-    // Exclude password before sending response
-    const { password: _, ...userWithoutPassword } = user.toObject();
+    const safeUser = sanitizeUser(user);
+    const token = signToken(user);
 
-    res.status(200).json({ success: true, data: userWithoutPassword });
+    res.status(200).json({ success: true, data: safeUser, token });
   } catch (error) {
     console.error("Error during login:", error.message);
     res.status(500).json({ success: false, message: "Server Error" });

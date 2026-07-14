@@ -6,12 +6,14 @@ import React, {
   ReactNode,
 } from "react";
 import { toast } from "sonner";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders, clearToken, setToken } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 export type UserRole = "user" | "admin";
 
 export interface User {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   avatar?: string;
@@ -26,6 +28,7 @@ interface AuthContextType {
   logout: () => void;
   signUp: (name: string, email: string, password: string) => Promise<boolean>;
   resetPassword: (email: string) => Promise<boolean>;
+  updateUser: (userData: Partial<User>) => void;
   likedBooks: string[];
   toggleLikeBook: (bookId: string) => void;
   isBookLiked: (bookId: string) => boolean;
@@ -33,168 +36,141 @@ interface AuthContextType {
 
 const UserContext = createContext<AuthContextType | undefined>(undefined);
 
+const normalizeUser = (raw: Record<string, unknown>): User => ({
+  id: String(raw.id || raw._id || ""),
+  _id: raw._id ? String(raw._id) : undefined,
+  name: String(raw.name || ""),
+  email: String(raw.email || ""),
+  avatar: raw.avatar ? String(raw.avatar) : undefined,
+  role: (raw.role as UserRole) || "user",
+});
+
 export const UserProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authBusy, setAuthBusy] = useState(false);
   const [likedBooks, setLikedBooks] = useState<string[]>([]);
 
-  // ✅ Ensure user is loaded from localStorage before setting isLoading to false
   useEffect(() => {
-    const loadUserFromStorage = async () => {
+    const loadUserFromStorage = () => {
       const savedUser = localStorage.getItem("user");
       const savedLikedBooks = localStorage.getItem("likedBooks");
 
       if (savedUser) {
         try {
-          const parsedUser = JSON.parse(savedUser);
-          // console.log("Loaded user from localStorage:", parsedUser);
-          setUser(parsedUser);
-        } catch (error) {
-          console.error("Error parsing user from localStorage:", error);
+          setUser(normalizeUser(JSON.parse(savedUser)));
+        } catch {
           localStorage.removeItem("user");
+          clearToken();
         }
       }
 
       if (savedLikedBooks) {
         try {
           setLikedBooks(JSON.parse(savedLikedBooks));
-        } catch (error) {
-          console.error("Error parsing likedBooks:", error);
+        } catch {
           localStorage.removeItem("likedBooks");
         }
       }
 
-      setIsLoading(false); // Set loading to false **after** user is loaded
+      setIsLoading(false);
     };
 
     loadUserFromStorage();
   }, []);
 
-  // ✅ Save user to localStorage whenever it changes
   useEffect(() => {
     if (user) {
-      // console.log("Saving user to localStorage:", user);
       localStorage.setItem("user", JSON.stringify(user));
     } else {
-      // console.log("Removing user from localStorage");
       localStorage.removeItem("user");
     }
   }, [user]);
 
-  // ✅ Save liked books to localStorage whenever they change
   useEffect(() => {
     localStorage.setItem("likedBooks", JSON.stringify(likedBooks));
   }, [likedBooks]);
 
-  // ✅ LOGIN FUNCTION
   const login = async (email: string, password: string): Promise<boolean> => {
-    setIsLoading(true);
+    setAuthBusy(true);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/users/login`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
-        }
-      );
+      const response = await fetch(`${API_URL}/api/users/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
       const data = await response.json();
-      console.log("Login response data:", data);
 
       if (response.ok) {
-        setUser(data.data); // Fix: Correctly set user from API response
+        if (data.token) setToken(data.token);
+        setUser(normalizeUser(data.data));
         toast.success("Successfully logged in!");
         return true;
-      } else {
-        toast.error(data.message || "Invalid email or password");
-        return false;
       }
-    } catch (error) {
+
+      toast.error(data.message || "Invalid email or password");
+      return false;
+    } catch {
       toast.error("Login failed. Please try again.");
       return false;
     } finally {
-      setIsLoading(false);
+      setAuthBusy(false);
     }
   };
 
-  // ✅ LOGOUT FUNCTION
   const logout = () => {
     setUser(null);
+    clearToken();
     localStorage.removeItem("user");
     toast.success("Successfully logged out");
   };
 
-  // ✅ SIGNUP FUNCTION
   const signUp = async (
     name: string,
     email: string,
     password: string
   ): Promise<boolean> => {
-    setIsLoading(true);
+    setAuthBusy(true);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/users`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, email, password, role: "user" }),
-        }
-      );
+      const response = await fetch(`${API_URL}/api/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
+      });
 
       const data = await response.json();
-      console.log("Signup response data:", data);
 
       if (response.ok) {
-        setUser(data.data);
+        if (data.token) setToken(data.token);
+        setUser(normalizeUser(data.data));
         toast.success("Account created successfully!");
         return true;
-      } else {
-        toast.error(data.message || "Sign-up failed");
-        return false;
       }
-    } catch (error) {
+
+      toast.error(data.message || "Sign-up failed");
+      return false;
+    } catch {
       toast.error("Sign-up failed. Please try again.");
       return false;
     } finally {
-      setIsLoading(false);
+      setAuthBusy(false);
     }
   };
 
-  
-
-  // ✅ RESET PASSWORD FUNCTION
-  const resetPassword = async (email: string): Promise<boolean> => {
-    try {
-      const response = await fetch(
-        `${API_URL}/api/users/reset-password`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success("Password reset link sent to your email");
-        return true;
-      } else {
-        toast.error(data.message || "No account found with this email");
-        return false;
-      }
-    } catch (error) {
-      toast.error("Password reset failed. Please try again.");
-      return false;
-    }
+  const resetPassword = async (_email: string): Promise<boolean> => {
+    toast.error("Password reset is not available yet. Contact an admin.");
+    return false;
   };
 
-  // ✅ BOOK LIKING FUNCTIONALITY
+  const updateUser = (userData: Partial<User>) => {
+    setUser((prev) => (prev ? { ...prev, ...userData } : prev));
+  };
+
   const toggleLikeBook = (bookId: string) => {
     if (!user) {
       toast.error("Please log in to like books");
@@ -205,10 +181,9 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({
       if (prev.includes(bookId)) {
         toast.success("Book removed from favorites");
         return prev.filter((id) => id !== bookId);
-      } else {
-        toast.success("Book added to favorites");
-        return [...prev, bookId];
       }
+      toast.success("Book added to favorites");
+      return [...prev, bookId];
     });
   };
 
@@ -216,22 +191,31 @@ export const UserProvider: React.FC<{ children: ReactNode }> = ({
     return likedBooks.includes(bookId);
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <UserContext.Provider
       value={{
         user,
         isAuthenticated: !!user,
-        isLoading,
+        isLoading: authBusy,
         login,
         logout,
         signUp,
         resetPassword,
+        updateUser,
         likedBooks,
         toggleLikeBook,
         isBookLiked,
       }}
     >
-      {!isLoading && children} {/* Only render children after loading user */}
+      {children}
     </UserContext.Provider>
   );
 };
@@ -243,3 +227,6 @@ export const useUser = (): AuthContextType => {
   }
   return context;
 };
+
+// Re-export for callers that need auth headers alongside user context
+export { authHeaders };

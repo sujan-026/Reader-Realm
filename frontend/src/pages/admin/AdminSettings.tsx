@@ -1,11 +1,11 @@
 import { AdminLayout } from "../../components/admin/AdminLayout";
-import { User, Settings, LogIn, Check } from "lucide-react";
+import { User, Settings, LogIn, Check, Loader2 } from "lucide-react";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { useUser } from "@/context/UserContext";
 import { useState, useEffect } from "react";
 import { toast } from "@/components/ui/use-toast";
-import { API_URL } from "@/lib/api";
+import { API_URL, authHeaders } from "@/lib/api";
 
 const AdminSettings = () => {
   const { user, isAuthenticated, updateUser } = useUser() as any;
@@ -77,11 +77,18 @@ const AdminSettings = () => {
     setIsLoading(true);
 
     // Validate form data
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      setIsLoading(false);
+      return;
+    }
 
     // Collect form data
-    const updateData: { id: string; name: string; email: string; role: string; password?: string } = {
-      id: user.id, // Use id for the database ID
+    const updateData: {
+      name: string;
+      email: string;
+      role: string;
+      password?: string;
+    } = {
       name,
       email,
       role,
@@ -91,15 +98,13 @@ const AdminSettings = () => {
       updateData.password = password;
     }
 
-    const url = `${API_URL}/api/users/${user.id}`;
+    const url = `${API_URL}/api/users/${user.id || user._id}`;
     const method = "PUT";
 
     try {
       const response = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: authHeaders(),
         body: JSON.stringify(updateData),
       });
 
@@ -109,8 +114,7 @@ const AdminSettings = () => {
 
       const result = await response.json();
 
-      // Update the user context with new data
-      updateUser(result);
+      updateUser(result.data || result);
 
       // Clear password fields
       setPassword("");
@@ -283,7 +287,7 @@ const AdminSettings = () => {
                   >
                     {isLoading ? (
                       <>
-                        <span className="mr-2">⌛</span>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                         Saving...
                       </>
                     ) : (
